@@ -4,54 +4,49 @@ from pycuda.compiler import SourceModule
 import numpy as np
 
 def get_password():
-    password = input("Please enter your password: ")
-    return password
+    return input("Please enter your password: ")
 
 def get_thread_count(characters, password_length):
-    print("Threads needed so every thread checks...")
-    print("1 password: " + str(get_max_combinations(characters, password_length, 1)))
-    print("10000000 passwords: " + str(get_max_combinations(characters, password_length, 1000000)))
-    processor_count = input("Please enter the number of threads: ")
-    return int(processor_count)
+    print("(info) Max combinations for this password with " + str(len(characters)) + " possible characters are:", get_combinations(password_length, characters))
+    return int(input("Please enter the number of threads: "))
 
 def get_combinations(password_length, characters):
-    combinations = len(characters) ** password_length
-    return combinations
+    return len(characters) ** password_length
 
-def get_portion_size(combinations, processor_count):
-    return combinations / processor_count
+def get_portion_size(combinations, thread_count):
+    return combinations / thread_count
 
-def get_starting_strings(portion_size, processor_count, password_length, characters):
-    print("Calculating starting strings... (This could take a while)")
+def get_starting_strings(portion_size, thread_count, password_length, characters):
+    print("Calculating entry points for " + str(thread_count) + " threads... (This might take a while)")
     starting_strings = []
-    for i in range(processor_count):
+    big_int_value = len(characters)  # Precompute length of characters string
+
+    for i in range(thread_count):
         current_portion = portion_size * i
-        start_string = ""
+        start_string = []
         for _ in range(password_length):
-            big_int_value = len(characters)
-            start_string += characters[int(current_portion) % int(big_int_value)]
+            index = int(current_portion) % big_int_value
+            start_string.append(characters[index])
             current_portion /= big_int_value
-        start_string = ''.join(reversed(start_string))
-        starting_strings.append(start_string)
+        starting_strings.append(''.join(start_string[::-1]))  # Reverse and append to starting_strings
+        
+    print("Calculating entry points complete!")
+    print("------------------------------------------------------------")
     return starting_strings
 
-def get_max_combinations(characters, password_length, passwords_per_thread):
-    combinations = len(characters) ** password_length
-    return combinations / passwords_per_thread
-
 # CUDA kernel for searching passwords
-cuda_kernel = """
+cuda_kernel = cuda_kernel = """
 __global__ void search_password(const char *user_password, char *starting_strings, int num_threads, int password_length, int update_rate, volatile int *password_found_flag) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
     if (idx < num_threads) {
-        char password[128];  // assuming max password length of 16
+        // Assuming maximum password length of 16
+        char password[128];
 
+        // Copy starting string for this thread
         for (int i = 0; i < password_length; ++i) {
             password[i] = starting_strings[idx * password_length + i];
         }
-
-        //printf("Thread %d starting with: %s\\n", idx, password);
 
         int counter = 0;
 
@@ -87,9 +82,9 @@ __global__ void search_password(const char *user_password, char *starting_string
             }
             counter++;
 
-            /*if (counter % update_rate == 0) {
+            if (update_rate > 0 && counter % update_rate == 0) {
                 printf("Thread %d: A: %d P: %s\\n", idx, counter, password);
-            }*/
+            }
         }
     }
 }
@@ -126,25 +121,27 @@ def local_cuda_search(user_password, starting_strings, password_length, update_r
     cuda.Context.synchronize()
 
 if __name__ == "__main__":
+    characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
     while True:
+        print("------------------------------------------------------------")
+        print("(info) Current character set is:", characters)
         user_password = get_password()
         password_length = len(user_password)
-        characters = "abcdefghijklmnopqrstuvwxyz"
         
         thread_count = get_thread_count(characters, password_length)
         portion_size = get_portion_size(get_combinations(password_length, characters), thread_count)
     
+        print("------------------------------------------------------------")
         print("Password:", user_password)
         print("Password Length:", password_length)
         print("Thread Count:", thread_count)
         print("Portion Size:", portion_size)
+        print("------------------------------------------------------------")
 
         starting_strings = get_starting_strings(portion_size, thread_count, password_length, characters)
-        #print(starting_strings)
-        print("Calculating starting strings finished!")
         
         # Parameters for CUDA search
-        update_rate = 100000000  # Define your update rate here
+        update_rate = 0  # How often the current passwort each thread is trying gets printed. 0 = no updates
         threads_per_block = 1024  # Maximum threads per block supported by your device
 
         local_cuda_search(user_password, starting_strings, password_length, update_rate, threads_per_block)
