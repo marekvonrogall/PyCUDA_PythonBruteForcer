@@ -6,7 +6,7 @@ Authors: [Marek von Rogall](https://github.com/marekvonrogall) & [Sprudello](htt
 This application tries to find out a password through trial and error. The condition for this is that the length of the password is known.
 This work was a leisure project.
 
-## Configuration &Usage:
+## Configuration & Usage:
 The program uses [pycuda](https://pypi.org/project/pycuda/) to perform fast computation on the GPU's threads. However, the implementation of pycuda requires a CUDA compatible NVIDIA graphics card.
 The prerequisite is that the CUDA toolkit is installed on your system. You can get the CUDA Toolkit from NVIDIA here: [NVIDIA CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit)
 
@@ -24,8 +24,11 @@ _Note: The more characters the character set contains, the more possible combina
 ```py
 update_rate = 0
 ```
+The update rate defines the interval in which the various threads display which password it's currently trying and how many passwords it already tried.
+If you reduce this value, the interval becomes smaller and the threads display their current status more often. A larger value results in fewer updates. To not receive any output values, set this value to 0.
 
 ### Adjusting the threads used per block: [here](https://github.com/marekvonrogall/PyCUDA_PythonBruteForcer/blob/50c1f4cc0113538ad4150c02d79977363ebfece9/PythonBruteForce/PythonBruteForce.py#L145)
 ```py
 threads_per_block = 1024
 ```
+Here you set how many threads each block of your graphics card should take over. This value may vary from graphics card to graphics card and must be adjusted accordingly.
