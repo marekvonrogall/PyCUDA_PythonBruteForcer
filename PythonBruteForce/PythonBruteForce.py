@@ -35,8 +35,8 @@ def get_starting_strings(portion_size, thread_count, password_length, characters
     return starting_strings
 
 # CUDA kernel for searching passwords
-cuda_kernel = cuda_kernel = """
-__global__ void search_password(const char *user_password, char *starting_strings, int num_threads, int password_length, int update_rate, volatile int *password_found_flag) {
+cuda_kernel = """
+__global__ void search_password(const char *user_password, char *starting_strings, int num_threads, int user_password_length, int update_rate, volatile int *password_found_flag, volatile long long int *attempts) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
     if (idx < num_threads) {
@@ -44,8 +44,8 @@ __global__ void search_password(const char *user_password, char *starting_string
         char password[128];
 
         // Copy starting string for this thread
-        for (int i = 0; i < password_length; ++i) {
-            password[i] = starting_strings[idx * password_length + i];
+        for (int i = 0; i < user_password_length; ++i) {
+            password[i] = starting_strings[idx * user_password_length + i];
         }
 
         int counter = 0;
@@ -58,7 +58,7 @@ __global__ void search_password(const char *user_password, char *starting_string
 
             // Compare passwords
             bool found = true;
-            for (int i = 0; i < password_length; ++i) {
+            for (int i = 0; i < user_password_length; ++i) {
                 if (password[i] != user_password[i]) {
                     found = false;
                     break;
@@ -72,7 +72,7 @@ __global__ void search_password(const char *user_password, char *starting_string
             }
 
             // Increment the password
-            for (int i = password_length - 1; i >= 0; --i) {
+            for (int i = user_password_length - 1; i >= 0; --i) {
                 if (password[i] == 'z') {
                     password[i] = 'a';  // wrap around from 'z' to 'a'
                 } else {
@@ -86,6 +86,9 @@ __global__ void search_password(const char *user_password, char *starting_string
                 printf("Thread %d: A: %d P: %s\\n", idx, counter, password);
             }
         }
+
+        // Store attempts made by this thread
+        attempts[idx] = counter;
     }
 }
 """
@@ -93,6 +96,7 @@ __global__ void search_password(const char *user_password, char *starting_string
 def local_cuda_search(user_password, starting_strings, password_length, update_rate, block_size):
     num_threads = len(starting_strings)
     password_found_flag = np.zeros(1, dtype=np.int32)
+    attempts = np.zeros(num_threads, dtype=np.int64)  # Array to store attempts made by each thread
 
     # Encode starting strings to bytes and concatenate
     starting_strings_bytes = b''.join(s.encode('utf-8') for s in starting_strings).ljust(num_threads * password_length, b'\0')
@@ -105,6 +109,9 @@ def local_cuda_search(user_password, starting_strings, password_length, update_r
     user_password_gpu = cuda.mem_alloc(password_length)
     cuda.memcpy_htod(user_password_gpu, user_password.encode('utf-8'))
 
+    # Allocate memory on GPU for attempts
+    attempts_gpu = cuda.mem_alloc(num_threads * np.dtype(np.int64).itemsize)
+
     # Compile CUDA kernel
     mod = SourceModule(cuda_kernel)
 
@@ -115,10 +122,17 @@ def local_cuda_search(user_password, starting_strings, password_length, update_r
     num_blocks = (num_threads + block_size - 1) // block_size
 
     # Launch kernel with multiple blocks
-    search_func(user_password_gpu, starting_strings_gpu, np.int32(num_threads), np.int32(password_length), np.int32(update_rate), cuda.InOut(password_found_flag), block=(block_size, 1, 1), grid=(num_blocks, 1))
+    search_func(user_password_gpu, starting_strings_gpu, np.int32(num_threads), np.int32(password_length), np.int32(update_rate), cuda.InOut(password_found_flag), attempts_gpu, block=(block_size, 1, 1), grid=(num_blocks, 1))
+
+    # Copy attempts from GPU to CPU
+    cuda.memcpy_dtoh(attempts, attempts_gpu)
 
     # Wait for kernel to finish
     cuda.Context.synchronize()
+
+    # Calculate total attempts made by all threads
+    total_attempts = np.sum(attempts)
+    print("Total attempts made by all threads:", total_attempts)
 
 if __name__ == "__main__":
     characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
