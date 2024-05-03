@@ -40,7 +40,7 @@ __global__ void search_password(const char *user_password, char *starting_string
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
     if (idx < num_threads) {
-        // Assuming maximum password length of 16
+        // Assuming maximum password length of 128
         char password[128];
 
         // Copy starting string for this thread
